@@ -1,0 +1,494 @@
+================================================================================
+                        EMS能源管理系统 - 充电桩模块
+================================================================================
+
+一、工作状态机
+--------------------------------------------------------------------------------
+
+1.1 状态定义
+- 待机 (Idle)：系统上电，等待车辆接入
+- 握手 (Handshake)：与BMS建立通讯，交换参数
+- 充电中 (Charging)：正常充电运行
+- 充电结束 (Finished)：充电完成或被终止
+- 故障 (Fault)：系统异常，停止工作
+
+1.2 状态转换条件
+- 待机→握手：检测到枪连接且电子锁闭合
+- 握手→充电中：与BMS完成参数协商，绝缘检测通过
+- 充电中→充电结束：SOC达到目标值/用户停止/定时定量完成
+- 任意状态→故障：发生保护性故障
+- 故障→待机：故障解除且复位
+
+
+二、遥测数据 (Telemetry - 周期性上报)
+--------------------------------------------------------------------------------
+
+2.1 物理状态监测
+- 枪连接检测 (CC信号)：是/否
+- 电子锁状态：锁定/解锁
+- 急停按钮：按下/松开
+
+2.2 电能数据采集
+- 实时电压 (V)：输出直流电压
+- 实时电流 (A)：输出直流电流
+- 实时功率 (kW)：电压×电流
+- 本次充电电量 (kWh)：累计电量
+- 充电时长：本次充电持续时间
+
+2.3 BMS透传数据
+- 电池SOC/SOH
+- 电池温度
+- 需求电压/电流
+
+
+三、遥信数据 (Status/Alarm - 变位上报)
+--------------------------------------------------------------------------------
+
+3.1 故障类型
+- 绝缘故障：绝缘电阻低于阈值
+- 过压故障：输出电压超限
+- 过流故障：输出电流超限
+- 过温故障：模块温度过高
+- 通讯故障：与BMS通讯中断
+- 急停故障：急停按钮被按下
+- 电子锁故障：锁状态异常
+
+3.2 告警功能
+- 故障码上报
+- 告警等级区分（警告/严重/紧急）
+- 故障记录存储
+
+
+四、遥控/配置 (Control - EMS 下发)
+--------------------------------------------------------------------------------
+
+4.1 启停控制
+- 远程启动充电
+- 远程停止充电
+- 紧急停机
+
+4.2 功率管理
+- 最大允许输出功率设置
+- 动态功率调节（削峰填谷）
+- 功率阶梯控制
+
+4.3 充电策略
+- 定时充电：设置开始/结束时间
+- 定量充电：设置目标电量
+- 定SOC充电：设置目标SOC值
+- 预约充电：支持预约时段
+
+4.4 电子锁控制
+- 远程解锁（结算后拔枪）
+- 锁定保持
+
+4.5 OTA升级
+- 固件版本查询
+- 固件下载
+- 升级执行与回滚
+
+
+五、与BMS交互 (GB/T-27930)
+--------------------------------------------------------------------------------
+
+5.1 充电流程
+1. 物理连接确认
+2. 低压辅助上电
+3. 充电握手（CHM/BHM）
+4. 参数交换（CRM/BRM/BCP/CTS/CML）
+5. 充电准备（BRO/CRO）
+6. 充电阶段（BCL/BCS/BSM/BMV/BMT/BSP/CCS）
+7. 充电结束（BST/CST）
+8. 统计数据（BSD/CSD）
+
+
+六、与EMS通讯协议 (OCPP)
+--------------------------------------------------------------------------------
+
+6.1 协议版本
+OCPP 1.6J / OCPP 2.0
+
+6.2 传输方式
+- 协议：WebSocket over TCP
+- 端口：默认8080
+- 数据格式：JSON-RPC
+
+6.3 核心消息（充电桩→EMS）
+- BootNotification：充电桩上线通知
+- StatusNotification：状态变更通知
+- MeterValues：电表数据上报
+- StartTransaction：充电开始通知
+- StopTransaction：充电结束通知
+- Heartbeat：心跳保活
+
+6.4 核心消息(EMS→充电桩)
+- RemoteStartTransaction:远程启动充电
+- RemoteStopTransaction:远程停止充电
+- ChangeConfiguration:配置修改
+- SetChargingProfile:设置充电策略
+- UnlockConnector:解锁充电枪
+- UpdateFirmware:固件升级
+- Reset:重启充电桩
+
+6.5 OCPP消息格式详细示例
+
+OCPP消息采用JSON-RPC 2.0格式,消息数组格式为:
+[消息类型, 消息ID, 动作名称, 载荷]
+
+消息类型:
+  2 = CALL (请求)
+  3 = CALLRESULT (成功响应)
+  4 = CALLERROR (错误响应)
+
+【充电桩 → EMS 消息】
+
+6.5.1 BootNotification (上线通知)
+充电桩启动后发送,向EMS注册自己。
+
+请求:
+[2, "unique-id-001", "BootNotification", {
+  "chargePointVendor": "厂商名称",
+  "chargePointModel": "DC-60kW-V2",
+  "chargePointSerialNumber": "SN202401001",
+  "chargeBoxSerialNumber": "BOX202401001",
+  "firmwareVersion": "v2.1.5",
+  "iccid": "8986031234567890123",
+  "imsi": "460012345678901",
+  "meterType": "AC Energy Meter",
+  "meterSerialNumber": "METER001"
+}]
+
+响应:
+[3, "unique-id-001", {
+  "status": "Accepted",
+  "currentTime": "2024-01-20T08:30:00Z",
+  "interval": 300
+}]
+
+状态值:
+  Accepted  - 接受注册
+  Pending   - 等待审核
+  Rejected  - 拒绝注册
+
+6.5.2 StatusNotification (状态变更通知)
+连接器状态变化时触发上报。
+
+请求:
+[2, "unique-id-002", "StatusNotification", {
+  "connectorId": 1,
+  "status": "Charging",
+  "errorCode": "NoError",
+  "info": "正常充电中",
+  "timestamp": "2024-01-20T08:30:15Z",
+  "vendorId": "CustomVendor",
+  "vendorErrorCode": "0"
+}]
+
+响应:
+[3, "unique-id-002", {}]
+
+状态值(status):
+  Available      - 可用
+  Preparing      - 准备中
+  Charging       - 充电中
+  SuspendedEVSE  - 桩端暂停
+  SuspendedEV    - 车端暂停
+  Finishing      - 结束中
+  Reserved       - 已预约
+  Unavailable    - 不可用
+  Faulted        - 故障
+
+错误码(errorCode):
+  NoError              - 无错误
+  ConnectorLockFailure - 电子锁故障
+  EVCommunicationError - 车辆通讯故障
+  GroundFailure        - 接地故障
+  HighTemperature      - 高温故障
+  InternalError        - 内部错误
+  LocalListConflict    - 本地列表冲突
+  OverCurrentFailure   - 过流故障
+  OverVoltage          - 过压故障
+  PowerMeterFailure    - 电表故障
+  UnderVoltage         - 欠压故障
+  WeakSignal           - 信号弱
+  OtherError           - 其他错误
+
+6.5.3 MeterValues (电表数据上报)
+周期性上报或充电过程中上报电能数据。
+
+请求:
+[2, "unique-id-003", "MeterValues", {
+  "connectorId": 1,
+  "transactionId": 12345,
+  "meterValue": [
+    {
+      "timestamp": "2024-01-20T08:30:00Z",
+      "sampledValue": [
+        {
+          "value": "220.5",
+          "context": "Sample.Periodic",
+          "format": "Raw",
+          "measurand": "Voltage",
+          "phase": "L1",
+          "location": "Outlet",
+          "unit": "V"
+        },
+        {
+          "value": "100.2",
+          "measurand": "Current.Import",
+          "unit": "A"
+        },
+        {
+          "value": "22.1",
+          "measurand": "Power.Active.Import",
+          "unit": "kW"
+        },
+        {
+          "value": "15.8",
+          "measurand": "Energy.Active.Import.Register",
+          "unit": "kWh"
+        },
+        {
+          "value": "85.2",
+          "measurand": "SoC",
+          "unit": "Percent"
+        },
+        {
+          "value": "35.5",
+          "measurand": "Temperature",
+          "unit": "Celsius"
+        }
+      ]
+    }
+  ]
+}]
+
+响应:
+[3, "unique-id-003", {}]
+
+常用measurand(测量量):
+  Voltage                        - 电压
+  Current.Import                 - 输入电流(充电)
+  Current.Export                 - 输出电流(放电)
+  Power.Active.Import            - 有功功率
+  Energy.Active.Import.Register  - 累计电能
+  SoC                            - 电池SOC
+  Temperature                    - 温度
+
+6.5.4 StartTransaction (充电开始通知)
+充电开始时发送。
+
+请求:
+[2, "unique-id-004", "StartTransaction", {
+  "connectorId": 1,
+  "idTag": "user-card-001",
+  "meterStart": 12580,
+  "timestamp": "2024-01-20T08:30:00Z",
+  "reservationId": 0
+}]
+
+响应:
+[3, "unique-id-004", {
+  "idTagInfo": {
+    "status": "Accepted",
+    "expiryDate": "2025-12-31T23:59:59Z",
+    "parentIdTag": "master-card-001"
+  },
+  "transactionId": 12345
+}]
+
+6.5.5 StopTransaction (充电结束通知)
+充电结束时发送。
+
+请求:
+[2, "unique-id-005", "StopTransaction", {
+  "transactionId": 12345,
+  "idTag": "user-card-001",
+  "timestamp": "2024-01-20T10:30:00Z",
+  "meterStop": 28350,
+  "reason": "EVDisconnected",
+  "transactionData": [
+    {
+      "timestamp": "2024-01-20T10:30:00Z",
+      "sampledValue": [
+        {
+          "value": "15770",
+          "measurand": "Energy.Active.Import.Register",
+          "unit": "Wh"
+        }
+      ]
+    }
+  ]
+}]
+
+响应:
+[3, "unique-id-005", {
+  "idTagInfo": {
+    "status": "Accepted"
+  }
+}]
+
+停止原因(reason):
+  EmergencyStop   - 紧急停止
+  EVDisconnected  - 车辆断开
+  HardReset       - 硬件复位
+  Local           - 本地停止
+  Other           - 其他
+  PowerLoss       - 断电
+  Reboot          - 重启
+  Remote          - 远程停止
+  SoftReset       - 软件复位
+  UnlockCommand   - 解锁命令
+  DeAuthorized    - 鉴权失败
+
+6.5.6 Heartbeat (心跳保活)
+周期性发送,保持连接。
+
+请求:
+[2, "unique-id-006", "Heartbeat", {}]
+
+响应:
+[3, "unique-id-006", {
+  "currentTime": "2024-01-20T08:31:00Z"
+}]
+
+【EMS → 充电桩 消息】
+
+6.5.7 RemoteStartTransaction (远程启动充电)
+EMS远程启动某个连接器的充电。
+
+请求:
+[2, "unique-id-007", "RemoteStartTransaction", {
+  "connectorId": 1,
+  "idTag": "user-card-001",
+  "chargingProfile": {
+    "chargingProfileId": 1,
+    "stackLevel": 0,
+    "chargingProfilePurpose": "TxProfile",
+    "chargingProfileKind": "Absolute",
+    "chargingSchedule": {
+      "chargingRateUnit": "W",
+      "chargingSchedulePeriod": [
+        {"startPeriod": 0, "limit": 30000},
+        {"startPeriod": 3600, "limit": 60000}
+      ]
+    }
+  }
+}]
+
+响应:
+[3, "unique-id-007", {
+  "status": "Accepted"
+}]
+
+6.5.8 RemoteStopTransaction (远程停止充电)
+EMS远程停止正在进行的交易。
+
+请求:
+[2, "unique-id-008", "RemoteStopTransaction", {
+  "transactionId": 12345
+}]
+
+响应:
+[3, "unique-id-008", {
+  "status": "Accepted"
+}]
+
+6.5.9 SetChargingProfile (设置充电策略)
+下发充电功率曲线。
+
+请求:
+[2, "unique-id-009", "SetChargingProfile", {
+  "connectorId": 1,
+  "csChargingProfiles": {
+    "chargingProfileId": 1,
+    "transactionId": 12345,
+    "stackLevel": 0,
+    "chargingProfilePurpose": "TxProfile",
+    "chargingProfileKind": "Absolute",
+    "recurrencyKind": "Daily",
+    "validFrom": "2024-01-20T00:00:00Z",
+    "validTo": "2024-01-21T00:00:00Z",
+    "chargingSchedule": {
+      "duration": 7200,
+      "startSchedule": "2024-01-20T08:00:00Z",
+      "chargingRateUnit": "W",
+      "chargingSchedulePeriod": [
+        {"startPeriod": 0, "limit": 30000, "numberPhases": 1},
+        {"startPeriod": 1800, "limit": 45000, "numberPhases": 1},
+        {"startPeriod": 3600, "limit": 60000, "numberPhases": 1}
+      ],
+      "minChargingRate": 6000
+    }
+  }
+}]
+
+响应:
+[3, "unique-id-009", {
+  "status": "Accepted"
+}]
+
+充电策略用途(chargingProfilePurpose):
+  ChargePointMaxProfile - 充电桩最大功率限制
+  TxDefaultProfile      - 交易默认配置
+  TxProfile             - 特定交易配置
+
+6.5.10 ChangeConfiguration (配置修改)
+修改充电桩参数。
+
+请求:
+[2, "unique-id-010", "ChangeConfiguration", {
+  "key": "HeartbeatInterval",
+  "value": "300"
+}]
+
+响应:
+[3, "unique-id-010", {
+  "status": "Accepted"
+}]
+
+状态值:
+  Accepted     - 已接受并应用
+  Rejected     - 拒绝
+  RebootRequired - 需重启后生效
+  NotSupported - 不支持该配置项
+
+6.5.11 UnlockConnector (解锁充电枪)
+远程解锁电子锁。
+
+请求:
+[2, "unique-id-011", "UnlockConnector", {
+  "connectorId": 1
+}]
+
+响应:
+[3, "unique-id-011", {
+  "status": "Unlocked"
+}]
+
+状态值:
+  Unlocked       - 已解锁
+  UnlockFailed   - 解锁失败
+  NotSupported   - 不支持
+
+6.5.12 Reset (重启充电桩)
+软/硬重启充电桩。
+
+请求:
+[2, "unique-id-012", "Reset", {
+  "type": "Soft"
+}]
+
+响应:
+[3, "unique-id-012", {
+  "status": "Accepted"
+}]
+
+重启类型:
+  Soft - 软重启(停止充电,重启软件)
+  Hard - 硬重启(断电重启)
+
+
+================================================================================
+文档版本：v1.0
+================================================================================
