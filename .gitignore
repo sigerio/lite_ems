@@ -1,0 +1,30 @@
+# IDE和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 构建输出
+build/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.exe
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Claude Code 工作目录
+.claude/
